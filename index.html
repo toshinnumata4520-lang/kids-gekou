@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>下校時刻を読み取る</title>
+<style>
+  :root { --blue: #1a73e8; --line: #dadce0; --off: #eeeeee; --ok: #188038; --ng: #d93025; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Hiragino Sans", "Meiryo", sans-serif; margin: 0; padding: 12px; font-size: 15px; color: #202124; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h2 { font-size: 15px; margin: 18px 0 6px; color: #1f3864; }
+  select, button { font: inherit; }
+  select { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  button { padding: 10px 14px; border: 1px solid var(--blue); color: var(--blue); background: #fff; border-radius: 6px; cursor: pointer; }
+  button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+  button.danger { background: var(--ng); color: #fff; border-color: var(--ng); }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+  .row > * { flex: 1 1 140px; }
+  .note { color: #5f6368; font-size: 13px; line-height: 1.5; }
+  .msg { margin: 8px 0; padding: 8px 10px; border-radius: 6px; font-size: 14px; white-space: pre-wrap; }
+  .msg.ok { background: #e6f4ea; color: #0d652d; }
+  .msg.ng { background: #fce8e6; color: #a50e0e; }
+  .msg.info { background: #e8f0fe; color: #174ea6; }
+  #thumbs { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  #thumbs img { width: 84px; height: 84px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 520px; }
+  th, td { border: 1px solid var(--line); padding: 2px; text-align: center; font-size: 13px; }
+  th { background: #2e5395; color: #fff; position: sticky; top: 0; }
+  td.day { background: #f8f9fa; white-space: nowrap; padding: 2px 6px; position: sticky; left: 0; }
+  tr.off td { background: var(--off); }
+  tr.off td.day { background: #e0e0e0; }
+  td input { width: 100%; min-width: 52px; padding: 7px 2px; border: 1px solid transparent; background: transparent; text-align: center; font-size: 14px; border-radius: 4px; }
+  td input:focus { border-color: var(--blue); background: #fff; outline: none; }
+  td input.changed { background: #fff8c5; }
+  td button.same { padding: 2px 6px; font-size: 12px; border-color: var(--line); color: #5f6368; }
+  #confirmBox { display: none; border: 2px solid var(--ng); border-radius: 8px; padding: 10px; margin-top: 10px; background: #fff5f5; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>学校の下校時刻を入れる</h1>
+<div id="status" class="msg info">読み込み中…</div>
+
+<h2>1. 学校をえらぶ</h2>
+<select id="school"><option value="">学校をえらんでください</option></select>
+<div id="schoolNote" class="note"></div>
+
+<div id="main" class="hidden">
+  <h2>2. 下校時刻表の写真を送る(読み取り)</h2>
+  <div class="row">
+    <button type="button" id="camBtn">写真を撮る</button>
+    <button type="button" id="pickBtn">写真をえらぶ</button>
+  </div>
+  <input type="file" id="camInput" accept="image/*" capture="environment" class="hidden">
+  <input type="file" id="pickInput" accept="image/*" multiple class="hidden">
+  <div id="thumbs"></div>
+  <div class="row"><button type="button" class="primary" id="readBtn" disabled>写真から読み取る</button></div>
+  <div class="note" id="readNote">写真は、学校の下校時刻表(月の予定表)が写っているものにしてください。読み取り結果は下の表に入ります。必ず見直して直してください。</div>
+
+  <h2>3. 表を見直して直す</h2>
+  <div class="note">時刻は「1450」のように数字だけでも入ります(1〜8時は午後と見なして +12時間)。「→」で、その日の1年の時刻を全学年へ写せます。黄色は変えた所です。</div>
+  <div class="tablewrap"><table id="tbl"></table></div>
+
+  <h2>4. 学校別シートに入れる</h2>
+  <div class="row"><button type="button" class="primary" id="applyBtn">学校別シートに入れる</button></div>
+  <div id="confirmBox">
+    <div id="confirmMsg" style="font-weight:bold; color:#a50e0e; white-space:pre-wrap"></div>
+    <div class="row">
+      <button type="button" class="danger" id="confirmYes">はい、入れる</button>
+      <button type="button" id="confirmNo">やめる</button>
+    </div>
+  </div>
+  <div id="result"></div>
+</div>
+
+<script>
+// ※合言葉(スタッフ用)は、QRコードのURLの「#k=…」に入っている。このファイルには書かない。
+var GAS_URL = 'https://script.google.com/macros/s/AKfycbw0f19Xg4Yd_b2QxpxzwnYoMcjy1C6hoCWADNHJxbyDWyHe1PzlrdRKQU7pTlS0H7_oYQ/exec';
+var KEY = (location.hash.match(/[#&]k=([^&]+)/) || [])[1] || '';
+var YOUBI = ['日', '月', '火', '水', '木', '金', '土'];
+var GRADES = ['1', '2', '3', '4', '5', '6', '特別'];
+var info = null, current = null, loaded = null, photos = [];
+
+function $(id) { return document.getElementById(id); }
+function say(text, cls) { var s = $('status'); s.textContent = text; s.className = 'msg ' + (cls || 'info'); s.style.display = text ? 'block' : 'none'; }
+
+function api(payload) {
+  payload.k = KEY;
+  return fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { if (!d.ok) { var e = new Error(d.error || '失敗しました'); e.noKey = d.noKey; throw e; } return d; });
+}
+
+// 時刻の入力をそろえる: 1450 → 14:50 / 250 → 14:50 / 14:50 → 14:50 / 空 → 空
+function normTime(s) {
+  s = String(s || '').replace(/[０-９：]/g, function (c) { return c === '：' ? ':' : String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }).trim();
+  if (!s) return '';
+  var m = s.match(/^(\d{1,2}):?(\d{2})$/);
+  if (!m) return null;
+  var h = Number(m[1]), mi = Number(m[2]);
+  if (mi > 59) return null;
+  if (h >= 1 && h <= 8) h += 12;
+  if (h > 23) return null;
+  return ('0' + h).slice(-2) + ':' + ('0' + mi).slice(-2);
+}
+
+function init() {
+  if (!KEY) { say('このページは、サイドバーのQRコードから開いてください(合言葉が付いていません)。', 'ng'); return; }
+  api({ action: 'gekouInfo' }).then(function (d) {
+    info = d;
+    var sel = $('school');
+    d.schools.forEach(function (s) {
+      var o = document.createElement('option'); o.value = s.name;
+      o.textContent = s.name + '(' + (s.year ? s.year + '年' + s.month + '月' : '月不明') + (s.filled ? '・入力済み' + s.filled : '・未入力') + ')';
+      sel.appendChild(o);
+    });
+    $('readBtn').dataset.hasKey = d.hasKey ? '1' : '';
+    say(d.hasKey ? '' : '※写真の読み取りは準備中です。写真を見ながら、表に手で入れてください。', d.hasKey ? 'info' : 'info');
+    if (d.hasKey) $('status').style.display = 'none';
+  }).catch(function (e) { say(e.message, 'ng'); });
+}
+
+$('school').addEventListener('change', function () {
+  var name = this.value;
+  $('main').classList.toggle('hidden', !name);
+  $('result').innerHTML = '';
+  if (!name) return;
+  current = info.schools.filter(function (s) { return s.name === name; })[0];
+  $('schoolNote').textContent = current.year ? (current.year + '年' + current.month + '月分の下校時刻表です(' + current.days + '日まで)。') : 'このシートは対象月が入っていません。管理者に連絡してください。';
+  say('今の入力を読み込んでいます…');
+  api({ action: 'gekouLoad', school: name }).then(function (d) {
+    loaded = d.values; buildTable(d.values); photos = []; renderThumbs(); say('');
+    $('status').style.display = 'none';
+  }).catch(function (e) { say(e.message, 'ng'); });
+});
+
+function buildTable(values) {
+  var t = $('tbl'); t.innerHTML = '';
+  var head = '<tr><th>日</th>' + ['1年', '2年', '3年', '4年', '5年', '6年', '特別'].map(function (g) { return '<th>' + g + '</th>'; }).join('') + '<th></th></tr>';
+  var html = head;
+  for (var d = 1; d <= current.days; d++) {
+    var dow = (current.firstDow + d - 1) % 7;
+    var off = dow === 0 || dow === 6;
+    html += '<tr class="' + (off ? 'off' : '') + '" data-day="' + d + '"><td class="day">' + d + '(' + YOUBI[dow] + ')</td>';
+    for (var g = 0; g < 7; g++) {
+      html += '<td><input type="text" inputmode="numeric" autocomplete="off" data-day="' + d + '" data-g="' + g + '" value="' + ((values && values[d - 1] && values[d - 1][g]) || '') + '"></td>';
+    }
+    html += '<td><button type="button" class="same" data-day="' + d + '">→</button></td></tr>';
+  }
+  t.innerHTML = html;
+}
+
+$('tbl').addEventListener('change', function (e) {
+  var el = e.target; if (el.tagName !== 'INPUT') return;
+  var v = normTime(el.value);
+  if (v === null) { el.value = ''; say('「' + el.dataset.day + '日」の時刻が読めませんでした。例: 1450', 'ng'); return; }
+  el.value = v; markChanged(el);
+});
+$('tbl').addEventListener('click', function (e) {
+  var b = e.target; if (!b.classList.contains('same')) return;
+  var d = b.dataset.day, first = document.querySelector('input[data-day="' + d + '"][data-g="0"]');
+  if (!first.value) return;
+  for (var g = 1; g < 6; g++) { var el = document.querySelector('input[data-day="' + d + '"][data-g="' + g + '"]'); el.value = first.value; markChanged(el); }
+});
+function markChanged(el) {
+  var d = Number(el.dataset.day), g = Number(el.dataset.g);
+  var orig = (loaded && loaded[d - 1] && loaded[d - 1][g]) || '';
+  el.classList.toggle('changed', el.value !== orig);
+}
+
+// 写真
+function renderThumbs() {
+  var box = $('thumbs'); box.innerHTML = '';
+  photos.forEach(function (p) { var im = document.createElement('img'); im.src = p.url; box.appendChild(im); });
+  $('readBtn').disabled = !photos.length || !$('readBtn').dataset.hasKey;
+  if (photos.length && !$('readBtn').dataset.hasKey) $('readNote').textContent = '写真の読み取りは準備中です。写真を見ながら、下の表に手で入れてください。';
+}
+function addFiles(files) {
+  Array.prototype.forEach.call(files, function (f) {
+    shrink(f).then(function (p) { photos.push(p); renderThumbs(); });
+  });
+}
+function shrink(file) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function () {
+      var max = 1800, w = img.width, h = img.height, s = Math.min(1, max / Math.max(w, h));
+      var c = document.createElement('canvas'); c.width = Math.round(w * s); c.height = Math.round(h * s);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      var data = c.toDataURL('image/jpeg', 0.85);
+      resolve({ url: data, mime: 'image/jpeg', data: data.split(',')[1] });
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = reject; img.src = url;
+  });
+}
+$('camBtn').addEventListener('click', function () { $('camInput').click(); });
+$('pickBtn').addEventListener('click', function () { $('pickInput').click(); });
+$('camInput').addEventListener('change', function () { addFiles(this.files); this.value = ''; });
+$('pickInput').addEventListener('change', function () { addFiles(this.files); this.value = ''; });
+
+$('readBtn').addEventListener('click', function () {
+  var b = this; b.disabled = true; say('読み取り中…(10〜30秒かかります)');
+  api({ action: 'gekouRead', school: current.name, images: photos.map(function (p) { return { mime: p.mime, data: p.data }; }) })
+    .then(function (d) {
+      var n = 0;
+      d.rows.forEach(function (r) {
+        if (r.day > current.days) return;
+        var g = r.grade === '特別' ? 6 : Number(r.grade) - 1;
+        var el = document.querySelector('input[data-day="' + r.day + '"][data-g="' + g + '"]');
+        if (el) { el.value = r.time; markChanged(el); n++; }
+      });
+      var warn = (d.month && current.month && Number(d.month) !== current.month) ? '\n※写真の月(' + d.month + '月)と、シートの月(' + current.month + '月)が違うようです。確かめてください。' : '';
+      say('読み取りました(' + n + 'マス)。表を見直して、違う所を直してください。' + (d.notes ? '\n注意: ' + d.notes : '') + warn, 'ok');
+      b.disabled = false;
+    }).catch(function (e) { say(e.message, 'ng'); b.disabled = false; });
+});
+
+// 反映(確認を1回挟む)
+function collectCells() {
+  var cells = [];
+  Array.prototype.forEach.call(document.querySelectorAll('#tbl input'), function (el) {
+    var d = Number(el.dataset.day), g = Number(el.dataset.g);
+    var orig = (loaded && loaded[d - 1] && loaded[d - 1][g]) || '';
+    if (el.value !== orig) cells.push({ day: d, grade: GRADES[g], time: el.value });
+  });
+  return cells;
+}
+$('applyBtn').addEventListener('click', function () {
+  var n = collectCells().length;
+  if (!n) { say('変えた所がありません。', 'ng'); return; }
+  $('confirmMsg').textContent = current.name + ' の ' + current.year + '年' + current.month + '月の下校時刻を、' + n + 'マス書き換えます。\nよろしいですか？(書く前の値は控えます)';
+  $('confirmBox').style.display = 'block';
+});
+$('confirmNo').addEventListener('click', function () { $('confirmBox').style.display = 'none'; });
+$('confirmYes').addEventListener('click', function () {
+  $('confirmBox').style.display = 'none';
+  var cells = collectCells();
+  say('学校別シートに入れています…');
+  api({ action: 'gekouApply', school: current.name, month: current.year + '-' + ('0' + current.month).slice(-2), cells: cells })
+    .then(function (d) {
+      say('入れました(書いた ' + d.wrote + 'マス・空にした ' + d.cleared + 'マス)。', 'ok');
+      loaded = null; return api({ action: 'gekouLoad', school: current.name });
+    }).then(function (d) { loaded = d.values; buildTable(d.values); })
+    .catch(function (e) { say(e.message, 'ng'); });
+});
+
+init();
+</script>
+</body>
+</html>
